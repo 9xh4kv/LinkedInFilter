@@ -92,6 +92,10 @@
     return regex.test(statusText);
   }
 
+  function hasAnyStatus(statusText, words) {
+    return words.some((word) => hasStatus(statusText, word));
+  }
+
   function ensureStyleInjected() {
     if (document.getElementById("lkf-style")) {
       return;
@@ -110,8 +114,10 @@
     const hideByKeyword =
       settings.summaryKeywords.length > 0 &&
       cardContainsKeyword(searchText, settings.summaryKeywords);
-    const hideByViewed = settings.hideViewedJobs && hasStatus(statusText, "viewed");
-    const hideByApplied = settings.hideAppliedJobs && hasStatus(statusText, "applied");
+    const hideByViewed =
+      settings.hideViewedJobs && hasAnyStatus(statusText, ["viewed", "visto"]);
+    const hideByApplied =
+      settings.hideAppliedJobs && hasAnyStatus(statusText, ["applied", "solicitados"]);
 
     return hideByKeyword || hideByViewed || hideByApplied;
   }

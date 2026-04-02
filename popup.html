@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LinkedIn Filter</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <h1>Job Keyword Filter</h1>
+      <p class="hint">Add keywords to hide matching LinkedIn jobs.</p>
+
+      <section class="toggles">
+        <label class="toggle-row" for="toggle-viewed">
+          <span>Hide viewed jobs</span>
+          <input id="toggle-viewed" type="checkbox" />
+        </label>
+        <label class="toggle-row" for="toggle-applied">
+          <span>Hide applied jobs</span>
+          <input id="toggle-applied" type="checkbox" />
+        </label>
+      </section>
+
+      <section class="keyword-section">
+        <h2>Job summary keywords</h2>
+        <p class="hint">Matches title, company, and location.</p>
+
+        <form id="keyword-form" class="row">
+          <input
+            id="keyword-input"
+            type="text"
+            placeholder="e.g. senior, java, onsite"
+            autocomplete="off"
+          />
+          <button type="submit">Add</button>
+        </form>
+
+        <ul id="keyword-list" class="keyword-list"></ul>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

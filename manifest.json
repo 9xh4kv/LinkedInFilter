@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Job Keyword Filter",
+  "version": "1.0.0",
+  "description": "Hide LinkedIn job cards that contain blocked keywords.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "linkedin-filter@local",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://www.linkedin.com/jobs/*"
+  ],
+  "action": {
+    "default_title": "LinkedIn Filter",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.linkedin.com/jobs/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

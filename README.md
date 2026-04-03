@@ -2,7 +2,7 @@
 
 This Firefox extension hides LinkedIn job cards when their text contains any blocked keyword.
 
-It can also reveal LinkedIn gated (blurred) cards in the list view with a gray background for easy visual distinction.
+It can also highlight matching words in job cards.
 
 ## What It Filters
 
@@ -14,11 +14,15 @@ The content script scans job cards that match:
 
 It can hide cards when any of these conditions are enabled:
 
-- Keyword match in title, company, or location (case-sensitive, whole-word matching)
+- Keyword match in title, company, or location (case-sensitive, accent-sensitive, whole-word matching)
 - Status contains Viewed / Visto (when Hide viewed jobs is enabled)
 - Status contains Applied / Solicitados (when Hide applied jobs is enabled)
 
 Hidden cards are removed from the list with `display: none`.
+
+It can highlight words when highlight keywords are configured:
+
+- Highlight matching words in title, company, location, or description (case-insensitive, accent-insensitive, whole-word matching; e.g., `junior` matches `júnior`)
 
 ## Install (Temporary Add-on in Firefox / Zen Browser)
 
@@ -31,9 +35,9 @@ Hidden cards are removed from the list with `display: none`.
 
 1. Open LinkedIn Jobs (`https://www.linkedin.com/jobs/`).
 2. Click the extension icon.
-3. Add keywords like `senior`, `onsite`, `java`, `intern`.
+3. Add hide keywords like `Senior`, `On-site`, `Java`, `Intern`.
 4. Matching jobs are removed automatically.
-5. Optionally enable **Unblur gated cards** to reveal text from blurred placeholders while keeping those rows visibly gray.
+5. Add **Highlight keywords** to keep matching jobs visible and emphasize matched words.
 
 ## Notes
 

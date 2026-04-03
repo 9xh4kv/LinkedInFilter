@@ -1,10 +1,13 @@
 (function () {
   const SUMMARY_KEYWORDS_STORAGE_KEY = "blockedKeywords";
+  const HIGHLIGHT_KEYWORDS_STORAGE_KEY = "highlightKeywords";
   const HIDE_VIEWED_STORAGE_KEY = "hideViewedJobs";
   const HIDE_APPLIED_STORAGE_KEY = "hideAppliedJobs";
   const UNBLUR_GATED_STORAGE_KEY = "unblurGatedJobs";
   const HIDDEN_CLASS = "lkf-hidden-card";
   const UNBLURRED_CLASS = "lkf-unblurred-card";
+  const HIGHLIGHT_WORD_CLASS = "lkf-highlight-word";
+  const DEFAULT_HIGHLIGHT_COLOR = "#fff2a8";
 
   function getStorage() {
     if (typeof browser !== "undefined" && browser.storage && browser.storage.local) {
@@ -15,6 +18,15 @@
 
   const storage = getStorage();
   const originalBlurredMarkupByCard = new WeakMap();
+  let currentSettings = {
+    summaryKeywords: [],
+    highlightKeywords: [],
+    hideViewedJobs: false,
+    hideAppliedJobs: false,
+    unblurGatedJobs: false
+  };
+  let applyTimer = null;
+  let isApplyingFilters = false;
 
   function normalize(value) {
     return String(value || "").toLowerCase().trim();
@@ -42,6 +54,39 @@
       return value;
     }
     return fallback;
+  }
+
+  function normalizeColor(color) {
+    const value = String(color || "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : DEFAULT_HIGHLIGHT_COLOR;
+  }
+
+  function parseHighlightKeywords(rawKeywords) {
+    if (!Array.isArray(rawKeywords)) {
+      return [];
+    }
+
+    const byKeyword = new Map();
+
+    rawKeywords.forEach((entry) => {
+      const keyword =
+        typeof entry === "string"
+          ? String(entry || "").trim()
+          : String(entry && entry.keyword ? entry.keyword : "").trim();
+
+      if (!keyword) {
+        return;
+      }
+
+      const color =
+        typeof entry === "string"
+          ? DEFAULT_HIGHLIGHT_COLOR
+          : normalizeColor(entry.color);
+
+      byKeyword.set(keyword.toLowerCase(), { keyword, color });
+    });
+
+    return Array.from(byKeyword.values());
   }
 
   function cardContainsKeyword(cardText, keywords) {
@@ -107,6 +152,178 @@
     return words.some((word) => hasStatus(statusText, word));
   }
 
+  function foldText(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/\p{M}+/gu, "")
+      .toLowerCase();
+  }
+
+  function getHighlightMatcher(highlightKeywords) {
+    if (!Array.isArray(highlightKeywords) || !highlightKeywords.length) {
+      return null;
+    }
+
+    const colorByKeyword = new Map();
+    highlightKeywords.forEach((entry) => {
+      const foldedKeyword = foldText(entry.keyword).trim();
+      if (!foldedKeyword) {
+        return;
+      }
+      colorByKeyword.set(foldedKeyword, normalizeColor(entry.color));
+    });
+
+    if (!colorByKeyword.size) {
+      return null;
+    }
+
+    return {
+      colorByKeyword
+    };
+  }
+
+  function clearWordHighlights(scope) {
+    scope.querySelectorAll(`.${HIGHLIGHT_WORD_CLASS}`).forEach((node) => {
+      node.replaceWith(document.createTextNode(node.textContent || ""));
+    });
+  }
+
+  function highlightWordsInTextNode(textNode, matcher) {
+    const text = textNode.textContent || "";
+    if (!text) {
+      return;
+    }
+
+    const wordRegex = /[\p{L}\p{N}][\p{L}\p{M}\p{N}_-]*/gu;
+    const fragment = document.createDocumentFragment();
+    let lastIndex = 0;
+    let hasHighlight = false;
+    let match = null;
+
+    while ((match = wordRegex.exec(text)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const foldedWord = foldText(match[0]);
+      const color = matcher.colorByKeyword.get(foldedWord);
+
+      if (!color) {
+        continue;
+      }
+
+      if (start > lastIndex) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+      }
+
+      const highlight = document.createElement("span");
+      highlight.className = HIGHLIGHT_WORD_CLASS;
+      highlight.textContent = match[0];
+      highlight.style.setProperty("background-color", color, "important");
+      fragment.appendChild(highlight);
+
+      lastIndex = end;
+      hasHighlight = true;
+    }
+
+    if (!hasHighlight) {
+      return;
+    }
+
+    if (lastIndex < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
+
+    textNode.replaceWith(fragment);
+  }
+
+  function highlightWordsInElement(rootElement, matcher) {
+    const walker = document.createTreeWalker(rootElement, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.parentElement) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        if (node.parentElement.closest(`.${HIGHLIGHT_WORD_CLASS}`)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(node.parentElement.tagName)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        if (!(node.textContent || "").trim()) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    const textNodes = [];
+    let currentNode;
+    while ((currentNode = walker.nextNode())) {
+      textNodes.push(currentNode);
+    }
+
+    textNodes.forEach((node) => {
+      highlightWordsInTextNode(node, matcher);
+    });
+  }
+
+  function applyKeywordWordHighlights(card, highlightKeywords) {
+    clearWordHighlights(card);
+
+    const matcher = getHighlightMatcher(highlightKeywords);
+    if (!matcher) {
+      return;
+    }
+
+    const highlightTargets = card.querySelectorAll(
+      [
+        ".job-card-list__title",
+        ".job-card-container__link",
+        ".artdeco-entity-lockup__subtitle",
+        ".job-card-container__metadata-wrapper li",
+        ".blurred-job-card__job-posting-title",
+        ".blurred-job-card__primary-description",
+        ".blurred-job-card__secondary-description"
+      ].join(", ")
+    );
+
+    highlightTargets.forEach((element) => {
+      highlightWordsInElement(element, matcher);
+    });
+  }
+
+  function applyKeywordWordHighlightsInDetails(highlightKeywords) {
+    const detailContainers = document.querySelectorAll(
+      ".jobs-search__job-details--container, .scaffold-layout__detail"
+    );
+
+    const matcher = getHighlightMatcher(highlightKeywords);
+
+    detailContainers.forEach((container) => {
+      clearWordHighlights(container);
+
+      if (!matcher) {
+        return;
+      }
+
+      const detailTargets = container.querySelectorAll(
+        [
+          ".job-details-jobs-unified-top-card__job-title",
+          ".job-details-jobs-unified-top-card__company-name",
+          ".job-details-jobs-unified-top-card__tertiary-description-container",
+          ".jobs-description__content",
+          ".jobs-company__box"
+        ].join(", ")
+      );
+
+      detailTargets.forEach((element) => {
+        highlightWordsInElement(element, matcher);
+      });
+    });
+  }
+
   function ensureStyleInjected() {
     if (document.getElementById("lkf-style")) {
       return;
@@ -119,6 +336,19 @@
       .${UNBLURRED_CLASS} {
         background: #e5e7eb !important;
         border-radius: 8px;
+      }
+      .${HIGHLIGHT_WORD_CLASS} {
+        color: inherit !important;
+        font: inherit !important;
+        font-family: inherit !important;
+        font-size: inherit !important;
+        font-style: inherit !important;
+        font-weight: inherit !important;
+        letter-spacing: inherit !important;
+        line-height: inherit !important;
+        text-decoration: inherit !important;
+        border-radius: 0;
+        padding: 0;
       }
     `;
     document.head.appendChild(style);
@@ -198,27 +428,51 @@
     );
 
     cards.forEach((card) => {
+      applyKeywordWordHighlights(card, settings.highlightKeywords);
       card.classList.toggle(HIDDEN_CLASS, shouldHideCard(card, settings));
     });
+
+    applyKeywordWordHighlightsInDetails(settings.highlightKeywords);
   }
 
-  async function loadSettingsAndApply() {
+  function scheduleApplyFilters() {
+    if (applyTimer !== null) {
+      return;
+    }
+
+    applyTimer = setTimeout(() => {
+      applyTimer = null;
+      isApplyingFilters = true;
+      try {
+        applyFilters(currentSettings);
+      } finally {
+        isApplyingFilters = false;
+      }
+    }, 50);
+  }
+
+  function parseSettingsFromStorage(result) {
+    return {
+      summaryKeywords: parseKeywords(result[SUMMARY_KEYWORDS_STORAGE_KEY]),
+      highlightKeywords: parseHighlightKeywords(result[HIGHLIGHT_KEYWORDS_STORAGE_KEY]),
+      hideViewedJobs: parseBoolean(result[HIDE_VIEWED_STORAGE_KEY], false),
+      hideAppliedJobs: parseBoolean(result[HIDE_APPLIED_STORAGE_KEY], false),
+      unblurGatedJobs: parseBoolean(result[UNBLUR_GATED_STORAGE_KEY], false)
+    };
+  }
+
+  async function loadSettings() {
     try {
       const result = await storage.get([
         SUMMARY_KEYWORDS_STORAGE_KEY,
+        HIGHLIGHT_KEYWORDS_STORAGE_KEY,
         HIDE_VIEWED_STORAGE_KEY,
         HIDE_APPLIED_STORAGE_KEY,
         UNBLUR_GATED_STORAGE_KEY
       ]);
 
-      const settings = {
-        summaryKeywords: parseKeywords(result[SUMMARY_KEYWORDS_STORAGE_KEY]),
-        hideViewedJobs: parseBoolean(result[HIDE_VIEWED_STORAGE_KEY], false),
-        hideAppliedJobs: parseBoolean(result[HIDE_APPLIED_STORAGE_KEY], false),
-        unblurGatedJobs: parseBoolean(result[UNBLUR_GATED_STORAGE_KEY], false)
-      };
-
-      applyFilters(settings);
+      currentSettings = parseSettingsFromStorage(result);
+      scheduleApplyFilters();
     } catch (error) {
       console.error("LinkedIn filter: failed to load settings", error);
     }
@@ -226,7 +480,10 @@
 
   function setupObserver() {
     const observer = new MutationObserver(() => {
-      loadSettingsAndApply();
+      if (isApplyingFilters) {
+        return;
+      }
+      scheduleApplyFilters();
     });
 
     observer.observe(document.body, {
@@ -243,6 +500,7 @@
 
       if (
         !changes[SUMMARY_KEYWORDS_STORAGE_KEY] &&
+        !changes[HIGHLIGHT_KEYWORDS_STORAGE_KEY] &&
         !changes[HIDE_VIEWED_STORAGE_KEY] &&
         !changes[HIDE_APPLIED_STORAGE_KEY] &&
         !changes[UNBLUR_GATED_STORAGE_KEY]
@@ -250,7 +508,23 @@
         return;
       }
 
-      loadSettingsAndApply();
+      if (changes[SUMMARY_KEYWORDS_STORAGE_KEY]) {
+        currentSettings.summaryKeywords = parseKeywords(changes[SUMMARY_KEYWORDS_STORAGE_KEY].newValue);
+      }
+      if (changes[HIGHLIGHT_KEYWORDS_STORAGE_KEY]) {
+        currentSettings.highlightKeywords = parseHighlightKeywords(changes[HIGHLIGHT_KEYWORDS_STORAGE_KEY].newValue);
+      }
+      if (changes[HIDE_VIEWED_STORAGE_KEY]) {
+        currentSettings.hideViewedJobs = parseBoolean(changes[HIDE_VIEWED_STORAGE_KEY].newValue, false);
+      }
+      if (changes[HIDE_APPLIED_STORAGE_KEY]) {
+        currentSettings.hideAppliedJobs = parseBoolean(changes[HIDE_APPLIED_STORAGE_KEY].newValue, false);
+      }
+      if (changes[UNBLUR_GATED_STORAGE_KEY]) {
+        currentSettings.unblurGatedJobs = parseBoolean(changes[UNBLUR_GATED_STORAGE_KEY].newValue, false);
+      }
+
+      scheduleApplyFilters();
     };
 
     if (typeof browser !== "undefined" && browser.storage && browser.storage.onChanged) {
@@ -261,7 +535,7 @@
   }
 
   ensureStyleInjected();
-  loadSettingsAndApply();
+  loadSettings();
   setupObserver();
   setupStorageListener();
 })();

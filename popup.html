@@ -21,26 +21,44 @@
           <input id="toggle-applied" type="checkbox" />
         </label>
         <label class="toggle-row" for="toggle-unblurred">
-          <span>Unblur gated cards</span>
+          <span>Reveal blurred jobs</span>
           <input id="toggle-unblurred" type="checkbox" />
         </label>
       </section>
 
       <section class="keyword-section">
-        <h2>Job summary keywords</h2>
-        <p class="hint">Matches title, company, and location.</p>
+        <h2>Hide keywords</h2>
+        <p class="hint">Hides jobs that match title, company, or location.</p>
 
         <form id="keyword-form" class="row">
           <input
             id="keyword-input"
             type="text"
-            placeholder="e.g. senior, java, onsite"
+            placeholder="e.g. Company, Senior, On-site (Case-Sensitive)"
             autocomplete="off"
           />
           <button type="submit">Add</button>
         </form>
 
         <ul id="keyword-list" class="keyword-list"></ul>
+      </section>
+
+      <section class="keyword-section">
+        <h2>Highlight keywords</h2>
+        <p class="hint">Highlights matching words in title, company, location, or description.</p>
+
+        <form id="highlight-form" class="row row--highlight">
+          <input
+            id="highlight-input"
+            type="text"
+            placeholder="e.g. qa, python, junior (Case-insensitive)"
+            autocomplete="off"
+          />
+          <div id="highlight-color-picker" class="color-picker color-picker--large"></div>
+          <button type="submit">Add</button>
+        </form>
+
+        <ul id="highlight-list" class="keyword-list"></ul>
       </section>
     </main>
 

@@ -2,7 +2,9 @@
   const SUMMARY_KEYWORDS_STORAGE_KEY = "blockedKeywords";
   const HIDE_VIEWED_STORAGE_KEY = "hideViewedJobs";
   const HIDE_APPLIED_STORAGE_KEY = "hideAppliedJobs";
+  const UNBLUR_GATED_STORAGE_KEY = "unblurGatedJobs";
   const HIDDEN_CLASS = "lkf-hidden-card";
+  const UNBLURRED_CLASS = "lkf-unblurred-card";
 
   function getStorage() {
     if (typeof browser !== "undefined" && browser.storage && browser.storage.local) {
@@ -12,6 +14,7 @@
   }
 
   const storage = getStorage();
+  const originalBlurredMarkupByCard = new WeakMap();
 
   function normalize(value) {
     return String(value || "").toLowerCase().trim();
@@ -22,10 +25,16 @@
       return [];
     }
 
-    return rawKeywords
-      .map(normalize)
-      .filter(Boolean)
-      .filter((value, index, array) => array.indexOf(value) === index);
+    const cleaned = rawKeywords.map((kw) => String(kw || "").trim()).filter(Boolean);
+    
+    const seen = new Set();
+    return cleaned.filter((keyword) => {
+      if (seen.has(keyword)) {
+        return false;
+      }
+      seen.add(keyword);
+      return true;
+    });
   }
 
   function parseBoolean(value, fallback) {
@@ -36,8 +45,11 @@
   }
 
   function cardContainsKeyword(cardText, keywords) {
-    const normalizedCardText = normalize(cardText);
-    return keywords.some((keyword) => normalizedCardText.includes(keyword));
+    return keywords.some((keyword) => {
+      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`\\b${escapedKeyword}\\b`);
+      return regex.test(cardText);
+    });
   }
 
   function getCardSearchText(card) {
@@ -82,7 +94,6 @@
       return statusText;
     }
 
-    // Fallback for LinkedIn UI variants where status is not in the usual footer classes.
     return normalize(card.innerText || card.textContent || "");
   }
 
@@ -103,11 +114,60 @@
 
     const style = document.createElement("style");
     style.id = "lkf-style";
-    style.textContent = `.${HIDDEN_CLASS} { display: none !important; }`;
+    style.textContent = `
+      .${HIDDEN_CLASS} { display: none !important; }
+      .${UNBLURRED_CLASS} {
+        background: #e5e7eb !important;
+        border-radius: 8px;
+      }
+    `;
     document.head.appendChild(style);
   }
 
+  function setUnblurredCards(unblurEnabled) {
+    const cards = Array.from(document.querySelectorAll("li.scaffold-layout__list-item"));
+
+    cards.forEach((card) => {
+      const blurredRoot = card.querySelector(".blurred-job-card");
+
+      if (!unblurEnabled) {
+        if (!card.classList.contains(UNBLURRED_CLASS)) {
+          return;
+        }
+
+        const originalMarkup = originalBlurredMarkupByCard.get(card);
+        if (typeof originalMarkup === "string") {
+          card.innerHTML = originalMarkup;
+        }
+        card.classList.remove(UNBLURRED_CLASS);
+        return;
+      }
+
+      if (!blurredRoot || card.classList.contains(UNBLURRED_CLASS)) {
+        return;
+      }
+
+      originalBlurredMarkupByCard.set(card, card.innerHTML);
+
+      const wrappers = card.querySelectorAll(".blurred-job-card");
+      wrappers.forEach((wrapper) => {
+        const fragment = document.createDocumentFragment();
+        while (wrapper.firstChild) {
+          fragment.appendChild(wrapper.firstChild);
+        }
+        wrapper.replaceWith(fragment);
+      });
+
+      card.classList.add(UNBLURRED_CLASS);
+    });
+  }
+
   function shouldHideCard(card, settings) {
+    // Never hide the currently selected job card.
+    if (hasActiveJobState(card)) {
+      return false;
+    }
+
     const searchText = getCardSearchText(card);
     const statusText = getCardStatusText(card);
 
@@ -123,7 +183,19 @@
   }
 
   function applyFilters(settings) {
-    const cards = document.querySelectorAll("li[data-occludable-job-id]");
+    setUnblurredCards(settings.unblurGatedJobs);
+
+    const cardCandidates = document.querySelectorAll(
+      [
+        "li[data-occludable-job-id]",
+        "li.discovery-templates-entity-item",
+        "li.scaffold-layout__list-item"
+      ].join(", ")
+    );
+
+    const cards = Array.from(cardCandidates).filter((card) =>
+      card.querySelector(".job-card-container")
+    );
 
     cards.forEach((card) => {
       card.classList.toggle(HIDDEN_CLASS, shouldHideCard(card, settings));
@@ -135,13 +207,15 @@
       const result = await storage.get([
         SUMMARY_KEYWORDS_STORAGE_KEY,
         HIDE_VIEWED_STORAGE_KEY,
-        HIDE_APPLIED_STORAGE_KEY
+        HIDE_APPLIED_STORAGE_KEY,
+        UNBLUR_GATED_STORAGE_KEY
       ]);
 
       const settings = {
         summaryKeywords: parseKeywords(result[SUMMARY_KEYWORDS_STORAGE_KEY]),
         hideViewedJobs: parseBoolean(result[HIDE_VIEWED_STORAGE_KEY], false),
-        hideAppliedJobs: parseBoolean(result[HIDE_APPLIED_STORAGE_KEY], false)
+        hideAppliedJobs: parseBoolean(result[HIDE_APPLIED_STORAGE_KEY], false),
+        unblurGatedJobs: parseBoolean(result[UNBLUR_GATED_STORAGE_KEY], false)
       };
 
       applyFilters(settings);
@@ -170,7 +244,8 @@
       if (
         !changes[SUMMARY_KEYWORDS_STORAGE_KEY] &&
         !changes[HIDE_VIEWED_STORAGE_KEY] &&
-        !changes[HIDE_APPLIED_STORAGE_KEY]
+        !changes[HIDE_APPLIED_STORAGE_KEY] &&
+        !changes[UNBLUR_GATED_STORAGE_KEY]
       ) {
         return;
       }

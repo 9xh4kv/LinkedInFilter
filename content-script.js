@@ -25,6 +25,7 @@
     hideAppliedJobs: false,
     unblurGatedJobs: false
   };
+  let previousSummaryKeywords = [];
   let applyTimer = null;
   let isApplyingFilters = false;
 
@@ -392,12 +393,7 @@
     });
   }
 
-  function shouldHideCard(card, settings) {
-    // Never hide the currently selected job card.
-    if (hasActiveJobState(card)) {
-      return false;
-    }
-
+  function getCardHideDecision(card, settings) {
     const searchText = getCardSearchText(card);
     const statusText = getCardStatusText(card);
 
@@ -408,8 +404,49 @@
       settings.hideViewedJobs && hasAnyStatus(statusText, ["viewed", "visto"]);
     const hideByApplied =
       settings.hideAppliedJobs && hasAnyStatus(statusText, ["applied", "solicitados"]);
+    const isActive = hasActiveJobState(card);
 
-    return hideByKeyword || hideByViewed || hideByApplied;
+    // Active jobs are only force-hidden when a hide keyword matches.
+    if (isActive && !hideByKeyword) {
+      return {
+        hideByKeyword,
+        hideByViewed,
+        hideByApplied,
+        shouldHide: false
+      };
+    }
+
+    return {
+      hideByKeyword,
+      hideByViewed,
+      hideByApplied,
+      shouldHide: hideByKeyword || hideByViewed || hideByApplied
+    };
+  }
+
+  function focusNextVisibleCard(cards, decisions, startIndex) {
+    for (let index = startIndex + 1; index < cards.length; index += 1) {
+      if (decisions[index].shouldHide) {
+        continue;
+      }
+
+      const card = cards[index];
+      const clickable = card.querySelector(
+        ".job-card-list__title, .job-card-container__link, a[href*='/jobs/view/']"
+      );
+
+      if (clickable && typeof clickable.click === "function") {
+        clickable.click();
+        return true;
+      }
+
+      if (typeof card.click === "function") {
+        card.click();
+        return true;
+      }
+    }
+
+    return false;
   }
 
   function applyFilters(settings) {
@@ -427,9 +464,23 @@
       card.querySelector(".job-card-container")
     );
 
-    cards.forEach((card) => {
+    const decisions = cards.map((card) => getCardHideDecision(card, settings));
+
+    // Only trigger focus change if keywords have changed (not just other settings).
+    const keywordsChanged = JSON.stringify(settings.summaryKeywords) !== JSON.stringify(previousSummaryKeywords);
+    const activeCardIndexToReplace = keywordsChanged
+      ? decisions.findIndex(
+          (decision, index) => decision.hideByKeyword && hasActiveJobState(cards[index])
+        )
+      : -1;
+
+    if (activeCardIndexToReplace !== -1) {
+      focusNextVisibleCard(cards, decisions, activeCardIndexToReplace);
+    }
+
+    cards.forEach((card, index) => {
       applyKeywordWordHighlights(card, settings.highlightKeywords);
-      card.classList.toggle(HIDDEN_CLASS, shouldHideCard(card, settings));
+      card.classList.toggle(HIDDEN_CLASS, decisions[index].shouldHide);
     });
 
     applyKeywordWordHighlightsInDetails(settings.highlightKeywords);
@@ -445,6 +496,7 @@
       isApplyingFilters = true;
       try {
         applyFilters(currentSettings);
+        previousSummaryKeywords = JSON.parse(JSON.stringify(currentSettings.summaryKeywords));
       } finally {
         isApplyingFilters = false;
       }
@@ -472,6 +524,7 @@
       ]);
 
       currentSettings = parseSettingsFromStorage(result);
+      previousSummaryKeywords = JSON.parse(JSON.stringify(currentSettings.summaryKeywords));
       scheduleApplyFilters();
     } catch (error) {
       console.error("LinkedIn filter: failed to load settings", error);
